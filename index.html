@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>SBIS Academic Portal</title>
+
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="login-design.css">
+</head>
+
+<body>
+
+    <!-- LOGIN SCREEN -->
+    <section id="login-screen" class="login-screen">
+
+        <div class="login-shell">
+
+            <!-- LEFT SIDE: SCHOOL BRANDING -->
+            <div class="login-brand">
+
+                <div class="login-logo">
+                    <img src="logo-transparent.png" alt="SBIS School Logo">
+                </div>
+
+                <span class="login-eyebrow">
+                    SUN OF KNOWLEDGE · IG DEPARTMENT
+                </span>
+
+                <h1>
+                    Academic excellence,<br>
+                    <em>beautifully managed.</em>
+                </h1>
+
+                <p>
+                    A dedicated workspace for Year 10, 11 and 12
+                    mock examinations, student results and
+                    academic reports.
+                </p>
+
+                <div class="login-points">
+                    <span>✦ Grade Management</span>
+                    <span>✦ Excel Import</span>
+                    <span>✦ Academic Reports</span>
+                </div>
+
+            </div>
+
+            <!-- RIGHT SIDE: ADMIN LOGIN -->
+            <div class="login-panel">
+
+                <div class="login-topline">
+                    <span class="login-dot"></span>
+                    PRIVATE ADMIN PORTAL
+                </div>
+
+                <h2>Welcome back</h2>
+
+                <p>
+                    Sign in with your authorized school account.
+                </p>
+
+                <!-- LOGIN FORM -->
+                <form id="loginForm" class="modern-login-form">
+
+                    <!-- EMAIL -->
+                    <div class="login-field">
+
+                        <label for="email">
+                            Email Address
+                        </label>
+
+                        <input id="email" name="email" type="email" placeholder="Enter your email address"
+                            autocomplete="username" required>
+
+                    </div>
+
+                    <!-- PASSWORD -->
+                    <div class="login-field">
+
+                        <label for="password">
+                            Password
+                        </label>
+
+                        <div class="password-wrapper">
+
+                            <input id="password" name="password" type="password" placeholder="Enter your password"
+                                autocomplete="current-password" required>
+
+                            <button type="button" id="togglePassword" class="password-toggle" aria-label="Show password"
+                                aria-pressed="false">
+                                Show
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                    <!-- SIGN IN BUTTON -->
+                    <button type="submit" class="login-submit">
+                        Sign In
+                    </button>
+
+                    <!-- ERROR MESSAGE -->
+                    <p id="loginError" class="login-error" role="alert"></p>
+
+                </form>
+
+                <div class="login-foot">
+                    Authorized administrators only ·
+                    SBIS Academic Portal
+                </div>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- MAIN APPLICATION -->
+    <div id="portal-app" class="hidden">
+
+        <!-- HEADER -->
+        <header>
+
+            <img src="logo-transparent.png" alt="SBIS Logo">
+
+            <div>
+                <h1>SBIS Academic Portal</h1>
+
+                <small>
+                    Sun of Knowledge British International School ·
+                    IG Department
+                </small>
+            </div>
+
+            <button type="button" onclick="logout()">
+                Sign Out
+            </button>
+
+        </header>
+
+
+        <!-- DASHBOARD LAYOUT -->
+        <div class="layout">
+
+            <!-- SIDEBAR -->
+            <aside>
+
+                <nav id="nav">
+
+                    <button class="active" data-page="dashboard">
+                        ▦ Dashboard
+                    </button>
+
+                    <button data-page="students">
+                        ♙ Students
+                    </button>
+
+                    <button data-page="grades">
+                        ✎ Enter Grades
+                    </button>
+
+                    <button data-page="import">
+                        ⇧ Import Excel / CSV
+                    </button>
+
+                    <button data-page="reports">
+                        ▤ Reports
+                    </button>
+
+                </nav>
+
+            </aside>
+
+
+            <!-- DYNAMIC PAGE CONTENT -->
+            <main id="main"></main>
+
+        </div>
+
+    </div>
+
+
+    <!-- REPORT PRINT CONTAINER -->
+    <div id="print-root" class="hidden"></div>
+
+
+    <!-- EXTERNAL LIBRARIES -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+
+    <!-- SUPABASE CONFIGURATION -->
+    <script src="supabase-config.js"></script>
+
+
+    <!-- ADMIN ACCOUNT INFORMATION -->
+    <script src="accounts.js"></script>
+
+
+
+    <!-- PDF DOWNLOAD LIBRARIES -->
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+    <!-- APPLICATION LOGIC -->
+    <script src="script.js"></script>
+
+
+    <!-- AUTHENTICATION -->
+    <script src="login.js"></script>
+
+</body>
+
+</html>
