@@ -10,7 +10,7 @@ let db = {
   mocks: []
 };
 
-const esc = (value) =>
+const esc = value =>
   String(value ?? "").replace(/[&<>"']/g, c => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -23,8 +23,8 @@ const normalize = value =>
   String(value ?? "").trim().toLowerCase();
 
 const heading = (title, description) =>
-  `<div class="heading"><div><h2>${title}</h2>
-  <p>${description}</p></div></div>`;
+  `<div class="heading"><div><h2>${esc(title)}</h2>
+  <p>${esc(description)}</p></div></div>`;
 
 const yearOptions = [10, 11, 12]
   .map(y => `<option value="${y}">Year ${y}</option>`)
@@ -35,9 +35,33 @@ const studentOptions = () => db.students.map(s =>
   (Year ${s.year})</option>`
 ).join("");
 
+const statusOptions = `
+  <option value="Recorded">Recorded</option>
+  <option value="Absent">Absent</option>
+  <option value="Pending">Pending</option>
+  <option value="N/A">N/A - No assessment held</option>
+`;
+
+const today = () => new Date().toLocaleDateString("en-CA");
+
 function notifyError(error) {
   console.error(error);
   alert(error.message || String(error));
+}
+
+function formatDate(value) {
+  if (!value) return "Not specified";
+  const date = new Date(value + "T12:00:00");
+  return Number.isNaN(date.getTime())
+    ? String(value)
+    : date.toLocaleDateString("en-GB");
+}
+
+function isValidDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return false;
+  const date = new Date(value + "T12:00:00Z");
+  return !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value;
 }
 
 async function loadData() {
@@ -47,12 +71,11 @@ async function loadData() {
 
   const results = await Promise.all(
     tables.map(table =>
-      supabaseClient.from(table).select("*")
-        .limit(10000)
+      supabaseClient.from(table).select("*").limit(10000)
     )
   );
 
-  results.forEach((result, i) => {
+  results.forEach(result => {
     if (result.error) throw result.error;
   });
 
@@ -71,14 +94,14 @@ async function loadData() {
   db.teachers = teachers;
   db.mocks = mocks;
 
+  const subjectMap = new Map(subjects.map(s => [s.id, s]));
+  const teacherMap = new Map(teachers.map(t => [t.id, t]));
+  const mockMap = new Map(mocks.map(m => [m.id, m]));
+
   db.grades = grades.map(g => {
-    const mock = mocks.find(m => m.id === g.mock_id);
-    const subject = subjects.find(
-      s => s.id === mock?.subject_id
-    );
-    const teacher = teachers.find(
-      t => t.id === mock?.teacher_id
-    );
+    const mock = mockMap.get(g.mock_id);
+    const subject = subjectMap.get(mock?.subject_id);
+    const teacher = teacherMap.get(mock?.teacher_id);
 
     return {
       id: g.id,
@@ -87,8 +110,12 @@ async function loadData() {
       subject: subject?.subject_name || "Unknown",
       mock: mock?.mock_name || "Unknown",
       teacher: teacher?.teacher_name || "",
+      type: mock?.assessment_type || "Mock",
+      date: mock?.assessment_date || "",
+      status: g.assessment_status || "Recorded",
       score: g.score,
-      total: g.max_score
+      total: g.max_score,
+      equivalent: g.equivalent_grade ?? ""
     };
   });
 
@@ -103,9 +130,7 @@ function go(nextPage) {
   page = nextPage;
 
   document.querySelectorAll("#nav button").forEach(b =>
-    b.classList.toggle(
-      "active", b.dataset.page === page
-    )
+    b.classList.toggle("active", b.dataset.page === page)
   );
 
   render();
@@ -129,7 +154,7 @@ function renderDashboard() {
   main.innerHTML =
     heading(
       "Dashboard",
-      "Manage student mock examination results"
+      "Manage student assessments and academic results"
     ) +
     `<div class="cards">
       <div class="card">
@@ -175,31 +200,23 @@ function renderStudents() {
     ) +
     `<div class="panel">
       <h3>Add Student</h3>
-
       <form id="student-form" class="grid">
         <div>
           <label>Student name</label>
-          <input name="name" required
-            placeholder="Full name">
+          <input name="name" required placeholder="Full name">
         </div>
-
         <div>
           <label>Year group</label>
           <select name="year">${yearOptions}</select>
         </div>
-
         <div>
           <label>Academic year</label>
-          <input name="academic"
-            value="2026–2027" required>
+          <input name="academic" value="2026–2027" required>
         </div>
-
         <div>
           <label>Student ID (optional)</label>
-          <input name="code"
-            placeholder="Unique school ID">
+          <input name="code" placeholder="Unique school ID">
         </div>
-
         <div style="align-self:end">
           <button class="primary">Add Student</button>
         </div>
@@ -208,7 +225,7 @@ function renderStudents() {
 
     <div class="panel">
       <h3>Student List</h3>
-      <div style="overflow-x:auto">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
@@ -240,8 +257,7 @@ function renderStudents() {
       </div>
     </div>`;
 
-  document.getElementById("student-form").onsubmit =
-    addStudent;
+  document.getElementById("student-form").onsubmit = addStudent;
 }
 
 async function addStudent(event) {
@@ -264,7 +280,6 @@ async function addStudent(event) {
       });
 
     if (error) throw error;
-
     await refresh();
   } catch (error) {
     notifyError(error);
@@ -274,8 +289,7 @@ async function addStudent(event) {
 }
 
 async function removeStudent(id) {
-  if (!confirm("Remove student and all their grades?"))
-    return;
+  if (!confirm("Remove student and all their grades?")) return;
 
   try {
     const { error } = await supabaseClient
@@ -296,11 +310,10 @@ function renderGrades() {
   main.innerHTML =
     heading(
       "Enter Grades",
-      "Record or update mock exam scores"
+      "Record Mocks, Quizzes and assessment results"
     ) +
     `<div class="panel">
       <form id="grade-form" class="grid">
-
         <div>
           <label>Student</label>
           <select name="studentId" required>
@@ -316,58 +329,93 @@ function renderGrades() {
 
         <div>
           <label>Teacher name (optional)</label>
-          <input name="teacher"
-            placeholder="Teacher">
+          <input name="teacher" placeholder="Teacher">
         </div>
 
         <div>
-          <label>Mock exam</label>
+          <label>Assessment Type</label>
+          <select name="type" required>
+            <option value="Mock">Mock</option>
+            <option value="Quiz">Quiz</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Assessment Name</label>
           <input name="mock"
-            placeholder="e.g. Mock 1" required>
+            placeholder="e.g. Mock 1 or Quiz 2" required>
+        </div>
+
+        <div>
+          <label>Assessment Date</label>
+          <input name="date" type="date"
+            value="${today()}" required>
+        </div>
+
+        <div>
+          <label>Assessment Status</label>
+          <select name="status" id="grade-status">
+            ${statusOptions}
+          </select>
         </div>
 
         <div>
           <label>Score</label>
           <input name="score" type="number"
-            min="0" step="0.01" required>
+            min="0" step="0.01">
         </div>
 
         <div>
           <label>Out of</label>
           <input name="total" type="number"
-            min="0.01" step="0.01" required>
+            min="0.01" step="0.01">
+        </div>
+
+        <div>
+          <label>Equivalent Grade (optional)</label>
+          <input name="equivalent"
+            placeholder="e.g. 9, 8, A*, A">
         </div>
 
         <div style="align-self:end">
           <button class="primary">Save Grade</button>
         </div>
       </form>
+      <p class="hint">
+        Use Recorded for numeric marks, Absent if the student
+        missed an assessment, Pending if marks are not available,
+        and N/A if no assessment was held.
+      </p>
     </div>
 
     <div class="panel">
       <h3>Saved Results</h3>
-      <div style="overflow-x:auto">
+      <div class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Student</th>
               <th>Subject</th>
-              <th>Mock</th>
-              <th>Score</th>
+              <th>Type</th>
+              <th>Assessment</th>
+              <th>Date</th>
+              <th>Result</th>
+              <th>Equivalent</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             ${db.grades.map(g => `
               <tr>
-                <td>${esc(
-                  db.students.find(
-                    s => s.id === g.studentId
-                  )?.name || "Unknown"
-                )}</td>
+                <td>${esc(db.students.find(
+                  s => s.id === g.studentId
+                )?.name || "Unknown")}</td>
                 <td>${esc(g.subject)}</td>
+                <td>${esc(g.type)}</td>
                 <td>${esc(g.mock)}</td>
-                <td>${esc(g.score)} / ${esc(g.total)}</td>
+                <td>${esc(formatDate(g.date))}</td>
+                <td>${esc(resultText(g))}</td>
+                <td>${esc(g.equivalent || "—")}</td>
                 <td>
                   <button class="secondary"
                     onclick="removeGrade('${g.id}')">
@@ -376,14 +424,40 @@ function renderGrades() {
                 </td>
               </tr>
             `).join("") ||
-              '<tr><td colspan="5">No grades yet.</td></tr>'}
+              '<tr><td colspan="8">No grades yet.</td></tr>'}
           </tbody>
         </table>
       </div>
     </div>`;
 
-  document.getElementById("grade-form").onsubmit =
-    saveGradeForm;
+  const form = document.getElementById("grade-form");
+  form.onsubmit = saveGradeForm;
+
+  const status = form.elements.status;
+
+  function updateFields() {
+    const recorded = status.value === "Recorded";
+    form.elements.score.disabled = !recorded;
+    form.elements.total.disabled = !recorded;
+    form.elements.equivalent.disabled = !recorded;
+    form.elements.score.required = recorded;
+    form.elements.total.required = recorded;
+
+    if (!recorded) {
+      form.elements.score.value = "";
+      form.elements.total.value = "";
+      form.elements.equivalent.value = "";
+    }
+  }
+
+  status.onchange = updateFields;
+  updateFields();
+}
+
+function resultText(g) {
+  return g.status === "Recorded"
+    ? `${g.score} / ${g.total}`
+    : g.status;
 }
 
 async function findOrCreate(table, column, value) {
@@ -402,7 +476,6 @@ async function findOrCreate(table, column, value) {
     .single();
 
   if (error) {
-    // Another admin may have inserted the same subject.
     if (error.code === "23505") {
       const result = await supabaseClient
         .from(table)
@@ -414,15 +487,10 @@ async function findOrCreate(table, column, value) {
       if (!result.error && result.data)
         return result.data.id;
     }
-
     throw error;
   }
 
-  db[table].push({
-    id: data.id,
-    [column]: name
-  });
-
+  db[table].push({ id: data.id, [column]: name });
   return data.id;
 }
 
@@ -431,24 +499,50 @@ async function saveGrade(d) {
     s => s.id === d.studentId
   );
 
-  if (!student)
-    throw new Error("Student not found.");
+  if (!student) throw new Error("Student not found.");
 
-  const score = Number(d.score);
-  const total = Number(d.total);
+  const type = d.type || "Mock";
+  const status = d.status || "Recorded";
+  const date = d.date || "";
 
-  if (
-    !Number.isFinite(score) ||
-    !Number.isFinite(total) ||
-    score < 0 ||
-    total <= 0 ||
-    score > total
-  ) {
-    throw new Error("Invalid score or maximum score.");
-  }
+  if (!["Mock", "Quiz"].includes(type))
+    throw new Error("Invalid assessment type.");
 
-  if (!d.subject?.trim() || !d.mock?.trim()) {
-    throw new Error("Subject and mock are required.");
+  if (!["Recorded", "Absent", "Pending", "N/A"].includes(status))
+    throw new Error("Invalid assessment status.");
+
+  if (!isValidDate(date))
+    throw new Error("A valid assessment date is required.");
+
+  if (!d.subject?.trim() || !d.mock?.trim())
+    throw new Error("Subject and assessment name are required.");
+
+  let score = null;
+  let total = null;
+  let equivalent = null;
+
+  if (status === "Recorded") {
+    if (
+      d.score === "" || d.score == null ||
+      d.total === "" || d.total == null
+    ) {
+      throw new Error("Score and maximum are required.");
+    }
+
+    score = Number(d.score);
+    total = Number(d.total);
+
+    if (
+      !Number.isFinite(score) ||
+      !Number.isFinite(total) ||
+      score < 0 ||
+      total <= 0 ||
+      score > total
+    ) {
+      throw new Error("Invalid score or maximum score.");
+    }
+
+    equivalent = String(d.equivalent ?? "").trim() || null;
   }
 
   const subjectId = await findOrCreate(
@@ -466,7 +560,9 @@ async function saveGrade(d) {
   let mock = db.mocks.find(m =>
     m.subject_id === subjectId &&
     normalize(m.mock_name) === normalize(d.mock) &&
-    m.year_group === Number(student.year) &&
+    (m.assessment_type || "Mock") === type &&
+    m.assessment_date === date &&
+    Number(m.year_group) === Number(student.year) &&
     m.academic_year === student.academic &&
     (m.teacher_id || null) === teacherId
   );
@@ -479,13 +575,14 @@ async function saveGrade(d) {
         subject_id: subjectId,
         teacher_id: teacherId,
         year_group: Number(student.year),
-        academic_year: student.academic
+        academic_year: student.academic,
+        assessment_type: type,
+        assessment_date: date
       })
       .select("*")
       .single();
 
     if (error) throw error;
-
     mock = data;
     db.mocks.push(mock);
   }
@@ -496,7 +593,9 @@ async function saveGrade(d) {
       student_id: student.id,
       mock_id: mock.id,
       score,
-      max_score: total
+      max_score: total,
+      equivalent_grade: equivalent,
+      assessment_status: status
     }, {
       onConflict: "student_id,mock_id"
     });
@@ -538,7 +637,7 @@ async function removeGrade(id) {
   }
 }
 
-// EXCEL IMPORT
+// EXCEL / CSV IMPORT
 
 let importedRows = [];
 let pending = [];
@@ -552,15 +651,28 @@ const aliases = {
   subject: ["subject", "course", "subject name"],
   teacher: ["teacher", "teacher name", "instructor"],
   mock: [
-    "mock", "mock name", "exam",
-    "exam name", "assessment", "test"
+    "mock", "mock name", "exam", "exam name",
+    "assessment", "assessment name", "test"
   ],
-  score: ["score", "mark", "marks", "grade", "result"],
+  type: ["assessment type", "type", "exam type"],
+  date: ["assessment date", "exam date", "date", "test date"],
+  status: ["assessment status", "status"],
+  score: ["score", "mark", "marks", "result"],
   total: [
     "total", "out of", "maximum",
     "max score", "full mark", "max marks"
+  ],
+  equivalent: [
+    "equivalent", "equivalent grade",
+    "igcse grade", "grade equivalent"
   ]
 };
+
+const importFields = [
+  "name", "code", "subject", "teacher",
+  "mock", "type", "date", "status",
+  "score", "total", "equivalent"
+];
 
 const normalizeHeader = value =>
   normalize(value).replace(/[^a-z0-9]+/g, " ").trim();
@@ -569,7 +681,7 @@ function renderImport() {
   main.innerHTML =
     heading(
       "Import Spreadsheet",
-      "Import scores for multiple students at once"
+      "Import Mocks and Quizzes for multiple students"
     ) +
     `<div class="panel">
       <h3>Upload Excel or CSV</h3>
@@ -595,8 +707,7 @@ function renderImport() {
       <div id="preview"></div>
     </div>`;
 
-  document.getElementById("upload").onchange =
-    handleImport;
+  document.getElementById("upload").onchange = handleImport;
 }
 
 async function handleImport(event) {
@@ -611,12 +722,12 @@ async function handleImport(event) {
   try {
     const workbook = XLSX.read(
       await file.arrayBuffer(),
-      { type: "array" }
+      { type: "array", cellDates: true }
     );
 
     importedRows = XLSX.utils.sheet_to_json(
       workbook.Sheets[workbook.SheetNames[0]],
-      { defval: "" }
+      { defval: "", raw: false, dateNF: "yyyy-mm-dd" }
     );
 
     if (!importedRows.length)
@@ -633,11 +744,6 @@ function showColumnMapping() {
     importedRows.flatMap(row => Object.keys(row))
   )];
 
-  const fields = [
-    "name", "code", "subject",
-    "teacher", "mock", "score", "total"
-  ];
-
   const options =
     '<option value="">Not included / use default</option>' +
     keys.map((key, i) =>
@@ -646,10 +752,10 @@ function showColumnMapping() {
 
   document.getElementById("preview").innerHTML =
     `<h3>Match Spreadsheet Columns</h3>
-    <p>Confirm the detected columns or choose manually.</p>
+    <p>Confirm detected columns or choose manually.</p>
 
     <div class="grid">
-      ${fields.map(field => `
+      ${importFields.map(field => `
         <div>
           <label>${esc(field.toUpperCase())}</label>
           <select id="map-${field}">
@@ -659,14 +765,30 @@ function showColumnMapping() {
       `).join("")}
     </div>
 
-    <div class="grid" style="margin-top:14px">
+    <h3 style="margin-top:22px">Default Values</h3>
+    <div class="grid">
       <div>
         <label>Default Subject</label>
         <input id="default-subject">
       </div>
       <div>
-        <label>Default Mock</label>
+        <label>Default Assessment Name</label>
         <input id="default-mock">
+      </div>
+      <div>
+        <label>Default Type</label>
+        <select id="default-type">
+          <option value="Mock">Mock</option>
+          <option value="Quiz">Quiz</option>
+        </select>
+      </div>
+      <div>
+        <label>Default Assessment Date</label>
+        <input id="default-date" type="date" value="${today()}">
+      </div>
+      <div>
+        <label>Default Status</label>
+        <select id="default-status">${statusOptions}</select>
       </div>
       <div>
         <label>Default Maximum Score</label>
@@ -686,7 +808,7 @@ function showColumnMapping() {
       </button>
     </div>`;
 
-  fields.forEach(field => {
+  importFields.forEach(field => {
     const index = keys.findIndex(key =>
       aliases[field].includes(normalizeHeader(key))
     );
@@ -699,15 +821,40 @@ function showColumnMapping() {
   window.importColumnKeys = keys;
 }
 
-function previewMappedImport() {
-  const fields = [
-    "name", "code", "subject",
-    "teacher", "mock", "score", "total"
-  ];
+function parseImportDate(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
 
+  if (isValidDate(raw)) return raw;
+
+  const match = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  if (match) {
+    const date = `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+    return isValidDate(date) ? date : "";
+  }
+
+  return "";
+}
+
+function canonicalStatus(value) {
+  const v = normalize(value);
+
+  if (!v || ["recorded", "complete", "completed"].includes(v))
+    return "Recorded";
+  if (["absent", "missing"].includes(v))
+    return "Absent";
+  if (["pending", "awaiting"].includes(v))
+    return "Pending";
+  if (["n/a", "na", "not held", "no assessment held"].includes(v))
+    return "N/A";
+
+  return null;
+}
+
+function previewMappedImport() {
   const map = {};
 
-  fields.forEach(field => {
+  importFields.forEach(field => {
     const index = document.getElementById(
       "map-" + field
     ).value;
@@ -718,31 +865,29 @@ function previewMappedImport() {
   });
 
   const defaults = {
-    subject: document.getElementById(
-      "default-subject"
-    ).value.trim(),
-    mock: document.getElementById(
-      "default-mock"
-    ).value.trim(),
-    total: document.getElementById(
-      "default-total"
-    ).value.trim(),
-    teacher: document.getElementById(
-      "default-teacher"
-    ).value.trim()
+    subject: document.getElementById("default-subject").value.trim(),
+    mock: document.getElementById("default-mock").value.trim(),
+    type: document.getElementById("default-type").value,
+    date: document.getElementById("default-date").value,
+    status: document.getElementById("default-status").value,
+    total: document.getElementById("default-total").value.trim(),
+    teacher: document.getElementById("default-teacher").value.trim()
   };
 
   pending = importedRows.map((row, i) => {
-    const get = field =>
-      map[field] === null
-        ? ""
-        : String(row[map[field]] ?? "").trim();
+    const get = field => map[field] === null
+      ? ""
+      : String(row[map[field]] ?? "").trim();
 
     const name = get("name");
     const code = get("code");
     const subject = get("subject") || defaults.subject;
     const mock = get("mock") || defaults.mock;
     const teacher = get("teacher") || defaults.teacher;
+    const type = get("type") || defaults.type;
+    const date = parseImportDate(get("date") || defaults.date);
+    const status = canonicalStatus(get("status") || defaults.status);
+    const equivalent = get("equivalent");
 
     let rawScore = get("score");
     let rawTotal = get("total") || defaults.total;
@@ -756,8 +901,8 @@ function previewMappedImport() {
       if (!rawTotal) rawTotal = pair[2];
     }
 
-    const score = Number(rawScore);
-    const total = Number(rawTotal);
+    const score = rawScore === "" ? null : Number(rawScore);
+    const total = rawTotal === "" ? null : Number(rawTotal);
 
     const matches = db.students.filter(s =>
       code
@@ -765,18 +910,34 @@ function previewMappedImport() {
         : normalize(s.name) === normalize(name)
     );
 
-    const valid = (
-      matches.length === 1 &&
-      !!subject &&
-      !!mock &&
-      rawScore !== "" &&
-      rawTotal !== "" &&
-      Number.isFinite(score) &&
-      Number.isFinite(total) &&
-      score >= 0 &&
-      total > 0 &&
-      score <= total
-    );
+    let reason = "";
+
+    if (matches.length !== 1) {
+      reason = "Student not uniquely matched";
+    } else if (!subject || !mock) {
+      reason = "Missing subject or assessment name";
+    } else if (!["Mock", "Quiz"].includes(type)) {
+      reason = "Invalid assessment type";
+    } else if (!date) {
+      reason = "Invalid assessment date";
+    } else if (!status) {
+      reason = "Invalid assessment status";
+    } else if (
+      status === "Recorded" &&
+      (
+        score === null || total === null ||
+        !Number.isFinite(score) ||
+        !Number.isFinite(total) ||
+        score < 0 || total <= 0 || score > total
+      )
+    ) {
+      reason = "Invalid score or maximum";
+    } else if (
+      status !== "Recorded" &&
+      (rawScore !== "" || equivalent !== "")
+    ) {
+      reason = "Non-recorded results cannot contain marks or equivalent";
+    }
 
     return {
       row: i + 2,
@@ -784,13 +945,15 @@ function previewMappedImport() {
       subject,
       mock,
       teacher,
-      score,
-      total,
+      type,
+      date,
+      status,
+      score: status === "Recorded" ? score : null,
+      total: status === "Recorded" ? total : null,
+      equivalent: status === "Recorded" ? equivalent : "",
       studentId: matches[0]?.id,
-      valid,
-      reason: matches.length !== 1
-        ? "Student not uniquely matched"
-        : "Missing or invalid fields"
+      valid: !reason,
+      reason
     };
   });
 
@@ -798,8 +961,7 @@ function previewMappedImport() {
 
   document.getElementById("preview").innerHTML =
     `<h3>Import Preview</h3>
-    <p>${good} ready ·
-    ${pending.length - good} need review</p>
+    <p>${good} ready · ${pending.length - good} need review</p>
 
     <div class="table-wrap">
       <table>
@@ -808,9 +970,12 @@ function previewMappedImport() {
             <th>Row</th>
             <th>Student</th>
             <th>Subject</th>
-            <th>Mock</th>
-            <th>Score</th>
-            <th>Status</th>
+            <th>Type</th>
+            <th>Assessment</th>
+            <th>Date</th>
+            <th>Result</th>
+            <th>Equivalent</th>
+            <th>Import Status</th>
           </tr>
         </thead>
         <tbody>
@@ -819,11 +984,12 @@ function previewMappedImport() {
               <td>${r.row}</td>
               <td>${esc(r.name)}</td>
               <td>${esc(r.subject)}</td>
+              <td>${esc(r.type)}</td>
               <td>${esc(r.mock)}</td>
-              <td>${esc(r.score)} / ${esc(r.total)}</td>
-              <td>${r.valid
-                ? "Ready"
-                : esc(r.reason)}</td>
+              <td>${esc(formatDate(r.date))}</td>
+              <td>${esc(resultText(r))}</td>
+              <td>${esc(r.equivalent || "—")}</td>
+              <td>${r.valid ? "Ready" : esc(r.reason)}</td>
             </tr>
           `).join("")}
         </tbody>
@@ -846,7 +1012,6 @@ function previewMappedImport() {
 
 async function commitImport() {
   const good = pending.filter(r => r.valid);
-
   if (!good.length) return;
 
   let completed = 0;
@@ -857,9 +1022,7 @@ async function commitImport() {
       await saveGrade(row);
       completed++;
     } catch (error) {
-      failures.push(
-        `Row ${row.row}: ${error.message}`
-      );
+      failures.push(`Row ${row.row}: ${error.message}`);
     }
   }
 
@@ -876,12 +1039,35 @@ async function commitImport() {
 }
 
 function downloadTemplate() {
-  const csv =
-    "Student ID,Student Name,Subject,Mock,Score,Total,Teacher\n" +
-    ",Example Student,Chemistry,Mock 1,35,40,Example Teacher\n";
+  const rows = [
+    [
+      "Student ID", "Student Name", "Subject",
+      "Assessment Type", "Assessment Name",
+      "Assessment Date", "Assessment Status",
+      "Score", "Total", "Equivalent Grade", "Teacher"
+    ],
+    [
+      "", "Example Student", "Chemistry",
+      "Mock", "Mock 1", "2026-11-11",
+      "Recorded", "35", "40", "9", "Example Teacher"
+    ],
+    [
+      "", "Example Student", "Physics",
+      "Quiz", "Quiz 1", "2026-11-12",
+      "Absent", "", "", "", "Example Teacher"
+    ]
+  ];
+
+  const csv = rows.map(row =>
+    row.map(value =>
+      `"${String(value).replace(/"/g, '""')}"`
+    ).join(",")
+  ).join("\r\n");
 
   downloadBlob(
-    new Blob([csv], { type: "text/csv" }),
+    new Blob(["\uFEFF" + csv], {
+      type: "text/csv;charset=utf-8"
+    }),
     "sbis-import-template.csv"
   );
 }
@@ -892,19 +1078,20 @@ function downloadBlob(blob, filename) {
 
   link.href = url;
   link.download = filename;
+  document.body.appendChild(link);
   link.click();
+  link.remove();
 
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-
- // REPORTS — DIRECT PDF DOWNLOAD
+// REPORTS
 
 function renderReports() {
   main.innerHTML =
     heading(
       "Generate Reports",
-      "Download branded student mock exam reports as PDF"
+      "Download student assessment reports as PDF"
     ) +
     `<div class="panel">
       <div class="grid">
@@ -919,7 +1106,23 @@ function renderReports() {
             ${yearOptions}
           </select>
         </div>
+
+        <div>
+          <label>From Date</label>
+          <input id="report-from" type="date">
+        </div>
+
+        <div>
+          <label>To Date</label>
+          <input id="report-to" type="date">
+        </div>
       </div>
+
+      <p class="hint">
+        Leave both dates empty to include all assessments.
+        Only assessments within the selected date range
+        will appear in the PDF.
+      </p>
 
       <div class="actions">
         <button class="primary"
@@ -936,6 +1139,16 @@ function renderReports() {
       <div id="report-options"
         style="margin-top:20px"></div>
     </div>`;
+}
+
+function reportFilters() {
+  const from = document.getElementById("report-from").value;
+  const to = document.getElementById("report-to").value;
+
+  if (from && to && from > to)
+    throw new Error("From Date must not be after To Date.");
+
+  return { from, to };
 }
 
 function selectedReportStudents() {
@@ -977,9 +1190,7 @@ function showReportOptions(mode) {
       <div class="actions">
         <button class="primary"
           onclick="printStudents([
-            document.getElementById(
-              'selected-student'
-            ).value
+            document.getElementById('selected-student').value
           ])">
           Download Student PDF
         </button>
@@ -1007,29 +1218,37 @@ function bulkReports() {
   );
 }
 
-function reportHTML(student) {
-  const grades = db.grades.filter(
-    g => g.studentId === student.id
-  );
+function filteredStudentGrades(student, filters) {
+  return db.grades
+    .filter(g =>
+      g.studentId === student.id &&
+      (!filters.from || (g.date && g.date >= filters.from)) &&
+      (!filters.to || (g.date && g.date <= filters.to))
+    )
+    .sort((a, b) =>
+      (a.date || "").localeCompare(b.date || "") ||
+      a.subject.localeCompare(b.subject)
+    );
+}
 
-  const subjects = [
-    ...new Set(grades.map(g => g.subject))
-  ];
+function reportHTML(student, filters) {
+  const grades = filteredStudentGrades(student, filters);
+  const subjects = [...new Set(grades.map(g => g.subject))];
+
+  const period = filters.from || filters.to
+    ? `${filters.from ? formatDate(filters.from) : "Start"} to
+       ${filters.to ? formatDate(filters.to) : "Present"}`
+    : "All assessment dates";
 
   return `
     <section class="report report-page">
       <div class="report-head">
-        <img src="logo-transparent.png"
-          alt="SBIS Logo">
-
+        <img src="logo-transparent.png" alt="SBIS Logo">
         <div>
           <h2>Student Academic Report</h2>
-          <div>
-            IG Department · Year ${esc(student.year)}
-          </div>
-          <div>
-            Academic Year ${esc(student.academic)}
-          </div>
+          <div>IG Department · Year ${esc(student.year)}</div>
+          <div>Academic Year ${esc(student.academic)}</div>
+          <div>Reporting Period: ${esc(period)}</div>
         </div>
       </div>
 
@@ -1041,30 +1260,31 @@ function reportHTML(student) {
 
       ${subjects.map(subject => `
         <h3>${esc(subject)}</h3>
-
         <table>
           <thead>
             <tr>
-              <th>Mock Examination</th>
-              <th>Score</th>
-              <th>Maximum</th>
+              <th>Type</th>
+              <th>Assessment</th>
+              <th>Date</th>
+              <th>Result</th>
+              <th>Equivalent</th>
             </tr>
           </thead>
-
           <tbody>
-            ${grades.filter(
-              g => g.subject === subject
-            ).map(g => `
-              <tr>
-                <td>${esc(g.mock)}</td>
-                <td>${esc(g.score)}</td>
-                <td>${esc(g.total)}</td>
-              </tr>
-            `).join("")}
+            ${grades.filter(g => g.subject === subject)
+              .map(g => `
+                <tr>
+                  <td>${esc(g.type)}</td>
+                  <td>${esc(g.mock)}</td>
+                  <td>${esc(formatDate(g.date))}</td>
+                  <td>${esc(resultText(g))}</td>
+                  <td>${esc(g.equivalent || "—")}</td>
+                </tr>
+              `).join("")}
           </tbody>
         </table>
       `).join("") ||
-        "<p>No mock results recorded yet.</p>"}
+        "<p>N/A — No assessment results recorded for this period.</p>"}
 
       <div class="report-foot">
         Sun of Knowledge British International School ·
@@ -1085,11 +1305,11 @@ async function waitForReportImages(element) {
 
   await Promise.all(images.map(img => {
     if (img.complete) {
-      if (img.naturalWidth === 0) {
+      if (img.naturalWidth === 0)
         return Promise.reject(
           new Error("Report logo could not load.")
         );
-      }
+
       return Promise.resolve();
     }
 
@@ -1103,6 +1323,15 @@ async function waitForReportImages(element) {
 }
 
 async function printStudents(ids) {
+  let filters;
+
+  try {
+    filters = reportFilters();
+  } catch (error) {
+    notifyError(error);
+    return;
+  }
+
   const students = ids
     .map(id => db.students.find(s => s.id === id))
     .filter(Boolean);
@@ -1112,14 +1341,8 @@ async function printStudents(ids) {
     return;
   }
 
-  if (
-    !window.html2canvas ||
-    !window.jspdf?.jsPDF
-  ) {
-    alert(
-      "PDF libraries are not loaded. " +
-      "Check the script tags in index.html."
-    );
+  if (!window.html2canvas || !window.jspdf?.jsPDF) {
+    alert("PDF libraries are not loaded.");
     return;
   }
 
@@ -1152,25 +1375,23 @@ async function printStudents(ids) {
     const usableWidth = pageWidth - margin * 2;
     const usableHeight = pageHeight - margin * 2;
 
-    // Render reports off-screen, without opening a new tab.
     container = document.createElement("div");
 
     Object.assign(container.style, {
-      position: "fixed",
-      left: "-10000px",
+      position: "absolute",
+      left: "0",
       top: "0",
       width: "794px",
       background: "#ffffff",
-      zIndex: "-1",
-      pointerEvents: "none"
+      opacity: "1",
+      pointerEvents: "none",
+      zIndex: "-1"
     });
 
     document.body.appendChild(container);
 
     for (let i = 0; i < students.length; i++) {
-      const student = students[i];
-
-      container.innerHTML = reportHTML(student);
+      container.innerHTML = reportHTML(students[i], filters);
 
       const report = container.querySelector(".report");
 
@@ -1186,40 +1407,29 @@ async function printStudents(ids) {
 
       await waitForReportImages(report);
 
-      // Wait for fonts before capturing the report.
-      if (document.fonts?.ready) {
+      if (document.fonts?.ready)
         await document.fonts.ready;
-      }
 
       const canvas = await html2canvas(report, {
         scale: 2,
         backgroundColor: "#ffffff",
         useCORS: true,
         logging: false,
-        windowWidth: 1100
+        windowWidth: 1100,
+        scrollX: 0,
+        scrollY: 0
       });
 
-      const imageData = canvas.toDataURL(
-        "image/jpeg",
-        0.92
-      );
-
+      const imageData = canvas.toDataURL("image/jpeg", 0.92);
       const imageHeight =
         canvas.height * usableWidth / canvas.width;
 
-      // Each student's report starts on a new PDF page.
-      if (i > 0) {
-        pdf.addPage();
-      }
+      if (i > 0) pdf.addPage();
 
-      // Short reports fit on one A4 page.
-      // Long reports continue onto additional pages.
       let renderedHeight = 0;
 
       while (renderedHeight < imageHeight) {
-        if (renderedHeight > 0) {
-          pdf.addPage();
-        }
+        if (renderedHeight > 0) pdf.addPage();
 
         pdf.addImage(
           imageData,
@@ -1241,15 +1451,9 @@ async function printStudents(ids) {
     pdf.save(filename);
 
   } catch (error) {
-    console.error("PDF generation failed:", error);
-    alert(
-      "Could not generate the PDF: " +
-      (error.message || String(error))
-    );
+    notifyError(error);
   } finally {
-    if (container) {
-      container.remove();
-    }
+    if (container) container.remove();
 
     if (originalText !== null) {
       button.disabled = false;
